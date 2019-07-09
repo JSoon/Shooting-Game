@@ -4,6 +4,7 @@ if (!PIXI.utils.isWebGLSupported()) {
 }
 
 PIXI.utils.sayHello(type);
+
 // 设置分辨率为设备分辨率，否则字体会模糊
 // https://github.com/pixijs/pixi.js/issues/1835#issuecomment-111119372
 // PIXI.RESOLUTION = window.devicePixelRatio;
@@ -13,6 +14,8 @@ let Application = PIXI.Application,
     Container = PIXI.Container,
     loader = PIXI.loader,
     resources = PIXI.loader.resources,
+    Text = PIXI.Text,
+    Texture = PIXI.Texture,
     TextureCache = PIXI.utils.TextureCache,
     Sprite = PIXI.Sprite,
     TextStyle = PIXI.TextStyle,
@@ -24,23 +27,25 @@ let Application = PIXI.Application,
 let viewWidth = document.documentElement.clientWidth; // mobile浏览器视觉宽度
 let viewHeight = document.documentElement.clientHeight; // mobile浏览器视觉宽度
 let bonusArea; // 双倍得分区域
+let bonusAreaMask; // 双倍得分区域蒙版
 let scoreUnitNormal = 10; // 击中加分（普通）
 let scoreUnitDouble = scoreUnitNormal * 2; // 击中加分（双倍）
 // 双倍得分区域
-let scoreDoubleArea = {
+let scoreDoubleRange = {
     start: viewHeight / 7,
     end: viewHeight / 7 + viewHeight / 3
 };
 let soundWaves = []; // 音浪
 let soundWaveRate = 1000; // 音浪动画频率，200ms
 let soundWaveLastTime = 0; // 音浪动画上一次时间点，用于限制音浪频率在soundWaveRate以内
-let soundWavesSpeed = 5; // 音浪速度
+let soundWavesSpeed = 3; // 音浪速度
 let soundWavesNum = 20; // 音浪数量
 let soundWaveWidth = viewWidth / soundWavesNum; // 单个音柱宽度
+let soundWaveDirection = 1; // 音浪移动方向，默认向下，若达到最大移动距离则反向移动
 // 音浪高度范围
-let soundWavesArea = {
+let soundWavesRange = {
     start: 0,
-    end: scoreDoubleArea.end - scoreDoubleArea.start
+    end: scoreDoubleRange.end - scoreDoubleRange.start
 };
 let scoreDisplayer; // 分数显示器
 let scoreDisplayerStyle; // 分数显示器样式
@@ -54,7 +59,11 @@ let bulletPowerTimer; // 子弹蓄力时间计时器
 let notes = []; // 音符数组
 let noteSpeed = 0.5; // 音符速度
 let noteTimer; // 音符定时器
-let noteSizeRange = [20, 80]; // 音符大小范围
+// 音符大小范围
+let noteSizeRange = {
+    start: 20,
+    end: 80
+};
 // 层级关系
 let zIndex = {
     bonusArea: 10,
@@ -128,29 +137,50 @@ function setup() {
     //and start the 'gameLoop'
 
     //#region 创建双倍得分区域
-    bonusArea = new Graphics();
-    updateLayersOrder(bonusArea, 'bonusArea');
-    bonusArea.beginFill(0x66CCFF);
-    bonusArea.drawRect(0, scoreDoubleArea.start, viewWidth, scoreDoubleArea.end - scoreDoubleArea.start);
-    bonusArea.endFill();
+    // 创建区域容器
+    bonusArea = new Container();
+    bonusArea.width = viewWidth;
+    bonusArea.height = scoreDoubleRange.end - scoreDoubleRange.start;
     bonusArea.x = 0;
-    bonusArea.y = 0;
+    bonusArea.y = scoreDoubleRange.start;
     app.stage.addChild(bonusArea);
+
+    // 创建背景色
+    let bonusAreaBg = new Graphics();
+    updateLayersOrder(bonusArea, 'bonusArea');
+    bonusAreaBg.beginFill(0x66CCFF);
+    bonusAreaBg.drawRect(0, 0, viewWidth, scoreDoubleRange.end - scoreDoubleRange.start);
+    bonusAreaBg.endFill();
+    bonusAreaBg.x = 0;
+    bonusAreaBg.y = 0;
+    bonusArea.addChild(bonusAreaBg);
+
+    // 创建蒙版，限制音浪显示范围
+    bonusAreaMask = new PIXI.Sprite(Texture.WHITE);
+    bonusAreaMask.width = viewWidth;
+    bonusAreaMask.height = scoreDoubleRange.end - scoreDoubleRange.start;
+    bonusArea.addChild(bonusAreaMask); // make sure mask it added to display list somewhere!
+    bonusArea.mask = bonusAreaMask;
 
     // 在双倍得分区域内创建音柱
     for (let s = 0; s < soundWavesNum; s += 1) {
         let soundWave = new Graphics();
         updateLayersOrder(soundWave, 'soundWaves');
-        let soundWaveHeight = randomInt(soundWavesArea.end / 5, soundWavesArea.end);
+        // let soundWaveHeight = randomInt(soundWavesRange.end / 5, soundWavesRange.end);
+        let soundWaveHeight = scoreDoubleRange.end - scoreDoubleRange.start;
         soundWave.lineStyle(2, 0x66CCFF, 1, 0);
         soundWave.beginFill(0xFF9933);
         soundWave.drawRoundedRect(0, 0, soundWaveWidth, soundWaveHeight,
-            10);
+            soundWaveWidth / 2.01);
         soundWave.endFill();
         soundWave.x = soundWaveWidth * s;
-        soundWave.y = scoreDoubleArea.end - soundWaveHeight;
-        app.stage.addChild(soundWave);
-        soundWaves.push(soundWave);
+        // soundWave.y = scoreDoubleRange.end - scoreDoubleRange.start - soundWaveHeight;
+        soundWave.y = randomInt(1 / 5 * soundWave.height, 4 / 5 * soundWave.height);
+        soundWaves.push({
+            soundWave: soundWave,
+            direction: soundWaveDirection
+        });
+        bonusArea.addChild(soundWave);
     }
     //#endregion
 
@@ -231,7 +261,7 @@ function setup() {
     //#region 创建音符🎵
     noteTimer = setInterval(function () {
         let note = new Sprite(resources.ball.texture);
-        let noteSize = randomInt(noteSizeRange[0], noteSizeRange[1]);
+        let noteSize = randomInt(noteSizeRange.start, noteSizeRange.end);
         updateLayersOrder(note, 'notes');
         note.alpha = 0.8;
         note.anchor.x = 0.5;
@@ -296,7 +326,7 @@ function play(delta) {
         if (hitNote) {
             console.log('bullet disappear after hitting');
             // 加分
-            if (notes[hitNoteAt].y >= scoreDoubleArea.start && notes[hitNoteAt].y <= scoreDoubleArea.end) {
+            if (notes[hitNoteAt].y >= scoreDoubleRange.start && notes[hitNoteAt].y <= scoreDoubleRange.end) {
                 scoreTotal += scoreUnitDouble;
                 console.log('双倍得分，当前得分', scoreTotal);
             } else {
@@ -327,7 +357,7 @@ function play(delta) {
     for (let n = notes.length - 1; n >= 0; n--) {
         let note = notes[n];
         let noteSize = note.width; // 音符大小
-        let k = noteSpeed * noteSizeRange[1]; // 速度大小比
+        let k = noteSpeed * noteSizeRange.end; // 速度大小比
 
         // 根据音符大小设置下落速度，下落速度与音符大小成反比
         note.vy = k / (noteSpeed * noteSize);
@@ -353,10 +383,26 @@ function play(delta) {
     }
     //#endregion
 
-    soundWaveAnimation(delta);
+    // return;
+    //#region 音浪动画
+    soundWaves.forEach(function (wave, index) {
+
+        wave.soundWave.vy = soundWavesSpeed * wave.direction;
+        wave.soundWave.y += wave.soundWave.vy;
+
+        // 当音浪移动到双倍得分区域边界后，进行反向移动，并改变音浪速度
+        if (
+            wave.soundWave.y > 4 / 5 * wave.soundWave.height ||
+            wave.soundWave.y < 1 / 5 * wave.soundWave.height
+        ) {
+            wave.direction *= -1;
+        }
+
+    });
+    //#endregion
 }
 
-// 音浪动画
+// 音浪动画（固定频率，暂时废弃）
 function soundWaveAnimation(delta) {
 
     // 限制动画帧率
@@ -372,34 +418,35 @@ function soundWaveAnimation(delta) {
     soundWaves.forEach(function (soundWave, index) {
 
         // 直接改变音浪高度（会导致拉伸，暂废弃）
-        // let soundWaveHeight = randomInt(soundWavesArea.end / 5, soundWavesArea.end);
+        // let soundWaveHeight = randomInt(soundWavesRange.end / 5, soundWavesRange.end);
         // soundWave.height = soundWaveHeight;
         // soundWave.radius = 10;
-        // soundWave.y = scoreDoubleArea.end - soundWaveHeight;
+        // soundWave.y = scoreDoubleRange.end - soundWaveHeight;
         // soundWave.updateTransform();
         // console.log(soundWave);
 
 
 
         // 销毁上次的音浪
-        app.stage.removeChild(soundWave);
+        bonusArea.removeChild(soundWave);
         // 重绘音浪动画
         let newSoundWave = new Graphics();
         updateLayersOrder(newSoundWave, 'soundWaves');
-        let soundWaveHeight = randomInt(soundWavesArea.end / 5, soundWavesArea.end);
+        let soundWaveHeight = randomInt(soundWavesRange.end / 5, soundWavesRange.end);
         newSoundWave.lineStyle(2, 0x66CCFF, 1, 0);
         newSoundWave.beginFill(0xFF9933);
         newSoundWave.drawRoundedRect(0, 0, soundWaveWidth, soundWaveHeight,
             10);
         newSoundWave.endFill();
         newSoundWave.x = soundWaveWidth * index;
-        newSoundWave.y = scoreDoubleArea.end - soundWaveHeight;
-        app.stage.addChild(newSoundWave);
+        newSoundWave.y = scoreDoubleRange.end - scoreDoubleRange.start - soundWaveHeight;
+        bonusArea.addChild(newSoundWave);
         soundWaves[index] = newSoundWave;
     });
     //#endregion
 }
 
+// 游戏结束
 function end() {
     //All the code that should run at the end of the game
 }
@@ -430,8 +477,19 @@ function bulletPowerEnd() {
     bulletPowerTime = 0;
 }
 
-//The game's helper functions:
+//# 辅助函数
 
+/**
+ * @description 触摸控制器
+ * 
+ * @param   {object}      opts 
+ * @param   {object}      opts.sprite   图形对象
+ * @param   {function}    opts.start    开始触摸回调函数     
+ * @param   {function}    opts.move     拖动触摸回调函数
+ * @param   {function}    opts.end      结束触摸回调函数
+ * 
+ * @returns {object}                    sprite图形对象
+ */
 function touchController(opts) {
     let sprite = opts.sprite;
     sprite.interactive = true //This is needed for make the mouse events works;
@@ -470,12 +528,24 @@ function touchController(opts) {
     return sprite;
 }
 
-// return [min, max]
+/**
+ * @description 范围随机整型生成函数
+ * 
+ * @param {number} min 最小数
+ * @param {number} max 最大数
+ * @returns int ∈ [min, max]
+ */
 function randomInt(min, max) {
     return Math.floor(Math.random() * (max - min + 1)) + min;
 }
 
-// 更新元素层级关系，保证新添加的元素处于正确的层级，避免遮挡
+/**
+ * @description 更新元素层级关系，保证新添加的元素处于正确的层级，避免遮挡
+ * 注：务必在新增加addChild后调用，以确保正确的层级关系
+ * 
+ * @param {object} sprite       图形对象
+ * @param {string} spriteName   对象名称（在层级定义对象中的名称）
+ */
 function updateLayersOrder(sprite, spriteName) {
     sprite.zIndex = zIndex[spriteName];
 
@@ -489,3 +559,5 @@ function updateLayersOrder(sprite, spriteName) {
         return b.zIndex - a.zIndex
     });
 }
+
+//#endregion
