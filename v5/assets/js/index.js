@@ -1,3 +1,5 @@
+//#region 检测WebGL支持
+
 let type = "WebGL";
 if (!PIXI.utils.isWebGLSupported()) {
     type = "canvas";
@@ -5,9 +7,9 @@ if (!PIXI.utils.isWebGLSupported()) {
 
 PIXI.utils.sayHello(type);
 
-// 设置分辨率为设备分辨率，否则字体会模糊
-// https://github.com/pixijs/pixi.js/issues/1835#issuecomment-111119372
-// PIXI.RESOLUTION = window.devicePixelRatio;
+//#endregion
+
+//#region 工具库别名定义
 
 //Aliases
 let Application = PIXI.Application,
@@ -23,7 +25,10 @@ let Application = PIXI.Application,
     Rectangle = PIXI.Rectangle,
     BUMP = new Bump(PIXI);
 
-//Define any variables that are used in more than one function
+//#endregion
+
+//#region 全局变量定义
+
 let viewWidth = document.documentElement.clientWidth; // mobile浏览器视觉宽度
 let viewHeight = document.documentElement.clientHeight; // mobile浏览器视觉宽度
 let bonusArea; // 双倍得分区域
@@ -40,6 +45,7 @@ let soundWaveRate = 1000; // 音浪动画频率，200ms
 let soundWaveLastTime = 0; // 音浪动画上一次时间点，用于限制音浪频率在soundWaveRate以内
 let soundWavesSpeed = 3; // 音浪速度
 let soundWavesNum = 20; // 音浪数量
+let soundWavesGap = 2; // 音柱间距
 let soundWaveWidth = viewWidth / soundWavesNum; // 单个音柱宽度
 let soundWaveDirection = 1; // 音浪移动方向，默认向下，若达到最大移动距离则反向移动
 // 音浪高度范围
@@ -74,6 +80,8 @@ let zIndex = {
     bunny: 60
 };
 
+//#endregion
+
 //Create a Pixi Application
 let app = new Application({
     width: 256,
@@ -82,10 +90,10 @@ let app = new Application({
     transparent: false, // default: false
     resolution: window.devicePixelRatio, // default: 1
 });
-// app.sortableChildren = true;
-app.stage.sortableChildren = true;
-// console.log(app.stage);
-
+app.stage.sortableChildren = true; // 设置子元素可排序
+// 设置分辨率为设备分辨率，否则字体会模糊
+// https://github.com/pixijs/pixi.js/issues/1835#issuecomment-111119372
+// PIXI.RESOLUTION = window.devicePixelRatio;
 
 //Add the canvas that Pixi automatically created for you to the HTML document
 let StageEle = document.getElementById('J_Stage');
@@ -168,14 +176,14 @@ function setup() {
         updateLayersOrder(soundWave, 'soundWaves');
         // let soundWaveHeight = randomInt(soundWavesRange.end / 5, soundWavesRange.end);
         let soundWaveHeight = scoreDoubleRange.end - scoreDoubleRange.start;
-        soundWave.lineStyle(2, 0x66CCFF, 1, 0);
+        // soundWave.lineStyle(1, 0x66CCFF, 1, 0);
         soundWave.beginFill(0xFF9933);
-        soundWave.drawRoundedRect(0, 0, soundWaveWidth, soundWaveHeight,
-            soundWaveWidth / 2.01);
+        soundWave.drawRoundedRect(0, 0, soundWaveWidth - soundWavesGap, 1.2 * soundWaveHeight,
+            soundWaveWidth / 2);
         soundWave.endFill();
-        soundWave.x = soundWaveWidth * s;
+        soundWave.x = soundWaveWidth * s + soundWavesGap / 2;
         // soundWave.y = scoreDoubleRange.end - scoreDoubleRange.start - soundWaveHeight;
-        soundWave.y = randomInt(1 / 5 * soundWave.height, 4 / 5 * soundWave.height);
+        soundWave.y = randomInt(0, 4 / 5 * soundWaveHeight);
         soundWaves.push({
             soundWave: soundWave,
             direction: soundWaveDirection
@@ -392,8 +400,8 @@ function play(delta) {
 
         // 当音浪移动到双倍得分区域边界后，进行反向移动，并改变音浪速度
         if (
-            wave.soundWave.y > 4 / 5 * wave.soundWave.height ||
-            wave.soundWave.y < 1 / 5 * wave.soundWave.height
+            wave.soundWave.y > 4 / 5 * (scoreDoubleRange.end - scoreDoubleRange.start) ||
+            wave.soundWave.y < 0
         ) {
             wave.direction *= -1;
         }
@@ -477,7 +485,7 @@ function bulletPowerEnd() {
     bulletPowerTime = 0;
 }
 
-//# 辅助函数
+//#region 辅助函数
 
 /**
  * @description 触摸控制器
